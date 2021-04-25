@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Trap finder.</title>
+	<script type="text/javascript" src="./chess.js"></script>
+	<style type="text/css">
+		* {
+			font-family: monospace;
+		}
+		body > div {
+			margin: 10px;
+			padding: 10px;
+			border: 1px solid;
+		}
+		.tooltip {
+			font-weight: bold;
+			border-bottom: 2px dotted;
+		}
+	</style>
+</head>
+<body>
+	<div>
+		Starting PGN text:
+		<input id="StartingPGN" placeholder="This is optional" value="">
+		<br>
+		<br>
+		Starting FEN position:
+		<input id="StartingPosition" placeholder="Enter FEN here" value="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">
+		<br>
+		<br>
+		Who should be better
+		<span class="tooltip" title="For which side the position should end up being better.">(?)</span>
+		<select id="WhoIsBetter"><option value="white" selected>White</option><option value="black">Black</option></select>
+		<br>
+		<br>
+		Max depth
+		<span class="tooltip" title="Maximum move depth to look for after the given starting fen.">(?)</span>:
+		<input id="MaxDepth" type="number" value="10">
+		<span id="ExpectVal1"></span>
+		<br>
+		<br>
+		Top move count
+		<span class="tooltip" title="Amount of moves to request from the API.">(?)</span>:
+		<input id="TopMove" type="number" value="16">
+		<span id="ExpectVal2"></span>
+		<br>
+		<br>
+		Usage threshold
+		<span class="tooltip" title="If the position has been played less than this value, it is ignored.">(?)</span>:
+		<input id="UsageThreshold" type="number" value="300">
+		<br>
+		<br>
+		Trap treshold
+		<span class="tooltip" title="Threshold for how better move winrate has to be for the selected player, for it to count as a 'trap'.">(?)</span>:
+		<input id="TrapThreshold" type="number" value="7">
+		<br>
+		<br>
+		Master database <span class="tooltip" title="Use master games rather than Lichess database games.">(?)</span>
+		<select id="MasterDB"><option value="lichess" selected>Nope, Lichess DB</option><option value="master">Master games only</option></select>
+		<br>
+		<br>
+		<button onclick="Start()">Search</button>
+		<span id="LookingAt"></span>
+		<br>
+		<span id="PositionCount"></span>
+	</div>
+	<hr>
+</body>
+<script type="text/javascript">
+let start_pgn = "";
+let start_position = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+let good_for = "black";
+let max_depth = 12;
+let move_in_result = 32; //amount of moves returned from the request
+let usage_threshold = 300; //minimum amount of played positions of the move to look into it
+let trap_threshold = 7; //this change in white/black % winrate = trap?
+let use_master_db = false;
+
+let white_to_move = start_position.includes(" w ");
+let request_delay = 1000; //delay per request
+let request_delay_error = 50000; //delay for the request failing
+let LookingAtSpan = document.getElementById("LookingAt");
+let PositionCountSpan = document.getElementById("PositionCount");
+let uniquePositionsExplored = {};
+document.getElementById("MaxDepth").onchange = expectValue;
+document.getElementById("TopMove").onchange = expectValue;
+
+function expectValue() {
+	let md = parseInt(document.getElementById("MaxDepth").value);
+	let mc = parseInt(document.getElementById("TopMove").value);
+	let sum = 0;
+	for(let i = 1; i <= md; i++) {
+		sum += mc ** i;
+	}
+	let str = `Expecting at most ${sum} positions`;
+	ExpectVal1.innerText = str;
+	ExpectVal2.innerText = str;
+}
+
+function Start() {
+	start_pgn = document.getElementById("StartingPGN").value;
+	start_position = document.getElementById("StartingPosition").value;
+	good_for = document.getElementById("WhoIsBetter").value === "white";
+	max_depth = parseInt(document.getElementById("MaxDepth").value);
+	move_in_result = parseInt(document.getElementById("TopMove").value);
+	usage_threshold = parseInt(document.getElementById("UsageThreshold").value);
+	trap_threshold = parseInt(document.getElementById("TrapThreshold").value);
+	use_master_db = document.getElementById("MasterDB").value === "master";
+	white_to_move = start_position.includes(" w ");
+
+	search(0, start_position, start_pgn, white_to_move);
+}
+
+async function search(depth, position, pgn, whiteToMove) {
+	if(depth > max_depth || uniquePositionsExplored[position]) {
+		return;
+	}
+	console.log(depth, pgn);
+	LookingAtSpan.innerText = "Looking at: " + pgn;
+	PositionCountSpan.innerText = `Explored ${Object.keys(uniquePositionsExplored).length} unique positions.`;
+	let res = await getLichessExplorerData(position);
+	if(!res) {
+		return await search(depth, position, pgn, whiteToMove);
+	}
+	uniquePositionsExplored[position] = true;
+
+	let c = new Chess(position);
+	let sum = res.white + res.black + res.draws;
+	let w_wr = (res.white / sum * 100);
+	let b_wr = (res.black / sum * 100);
+
+	for(let i = 0; i < res.moves.length; i++) {
+		//console.log("Looking at", res.moves[i].san);
+		let sum_now = res.moves[i].white + res.moves[i].black + res.moves[i].draws;
+		if(sum_now < usage_threshold) {
+			continue; //Not good enough
+		}
+
+		let w_wr_now = (res.moves[i].white / sum_now * 100);
+		let b_wr_now = (res.moves[i].black / sum_now * 100);
+		let jump = hasWinrateJump(w_wr, b_wr, w_wr_now, b_wr_now);
+
+		if(jump) {
+			//if((whiteToMove && (jump === "+w" || jump === "-b")) || (!whiteToMove && (jump === "+b" || jump === "-w"))) {
+			if(good_for === "black" && (!whiteToMove && (jump === "+b" || jump === "-w"))) {
+				displayResult(pgn + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
+			}
+			if(good_for === "white" && (whiteToMove && (jump === "+w" || jump === "-b"))) {
+				displayResult(pgn + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
+			}
+		} else {
+			c.move(res.moves[i].san);
+			await search(depth + 1, c.fen(), pgn + res.moves[i].san + " ", !whiteToMove);
+			c.undo();
+		}
+	}
+	if(depth === 0) {
+		alert("Finished looking!");
+		LookingAtSpan.innerHTML = "<b>Finished.</b>";
+	}
+}
+
+function displayResult(pgn, w_wr, w_wr_now, b_wr, b_wr_now) {
+	let outer = document.createElement("div");
+	let div = document.createElement("div");
+	div.innerText = pgn;
+	let div2 = document.createElement("div");
+	div2.innerText = `Difference: W{${(w_wr_now-w_wr).toFixed(2)}} B{${(b_wr_now-b_wr).toFixed(2)}}`;
+
+	outer.appendChild(div);
+	outer.appendChild(div2);
+	document.body.appendChild(outer);
+}
+
+function hasWinrateJump(w1, b1, w2, b2) {
+	if(Math.abs(w1 - w2) >= trap_threshold) {
+		if(w2 > w1) {
+			return "+w"; //white wr increased
+		} else {
+			return "-w";
+		}
+	}
+	if(Math.abs(b1 - b2) >= trap_threshold) {
+		if(b2 > b1) {
+			return "+b"; //black wr increased
+		} else {
+			return "-b";
+		}
+	}
+	return null;
+}
+
+function getLichessExplorerData(fen) {
+	var url = "https://explorer.lichess.ovh/" + (use_master_db ? "master" : "lichess") +
+		"?variant=standard" +
+		"&moves=" + move_in_result +
+		"&topGames=0" +
+		"&fen=" + fen +
+		"&speeds[]=blitz&speeds[]=classical&speeds[]=bullet&speeds[]=rapid" +
+		"&ratings[]=2000&ratings[]=2200&ratings[]=2500&ratings[]=1800&ratings[]=1600";
+
+	return fetch(url)
+		.then(response => response.status === 200 ? response.json() : null)
+		.then(json => new Promise(resolve => setTimeout(_ => resolve(json), json ? request_delay : request_delay_error)));
+}
+</script>
+</html>
