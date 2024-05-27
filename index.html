@@ -2,19 +2,32 @@
 <html>
 <head>
 	<title>Trap finder.</title>
-	<script type="text/javascript" src="./chess.js"></script>
+	<script type="text/javascript" src="./js/jquery-3.7.1.min.js"></script>
+	<script type="text/javascript" src="./js/chess.js"></script>
+	<script type="text/javascript" src="./js/chessboard-1.0.0.min.js"></script>
+	<link rel="stylesheet" type="text/css" href="./css/chessboard-1.0.0.css">
 	<style type="text/css">
 		* {
 			font-family: monospace;
+		}
+		body {
+			margin: 0;
 		}
 		body > div {
 			margin: 10px;
 			padding: 10px;
 			border: 1px solid;
+			position: relative;
 		}
 		.tooltip {
 			font-weight: bold;
 			border-bottom: 2px dotted;
+		}
+		#StartingBoard {
+			position: absolute;
+			right: 10px;
+			top: 10px;
+			width: 330px;
 		}
 	</style>
 </head>
@@ -69,6 +82,7 @@
 		<span id="PositionCount"></span>
 		<br>
 		<span id="Progress"></span>
+		<div id="StartingBoard"></div>
 	</div>
 	<hr>
 </body>
@@ -91,14 +105,23 @@ let LookingAtSpan = document.getElementById("LookingAt");
 let PositionCountSpan = document.getElementById("PositionCount");
 let ProgressSpan = document.getElementById("Progress");
 let uniquePositionsExplored = {};
-document.getElementById("StartingPosition").onchange = expectValue;
-document.getElementById("WhoIsBetter").onchange = expectValue;
-document.getElementById("MaxDepth").onchange = expectValue;
-document.getElementById("TopMove").onchange = expectValue;
-document.getElementById("TopMoveOpponent").onchange = expectValue;
-expectValue();
+let StartingBoard = Chessboard('StartingBoard', 'start');
 
-function expectValue() {
+document.getElementById("StartingPosition").onchange = function(e) {
+	StartingBoard.position(this.value);
+	updateExpectValue();
+};
+document.getElementById("WhoIsBetter").onchange = function(e) {
+	StartingBoard.orientation(this.value);
+	updateExpectValue();
+};;
+document.getElementById("MaxDepth").onchange = updateExpectValue;
+document.getElementById("TopMove").onchange = updateExpectValue;
+document.getElementById("TopMoveOpponent").onchange = updateExpectValue;
+updateExpectValue();
+
+
+function updateExpectValue() {
 	let white_to_move = document.getElementById("StartingPosition").value.includes(" w ");
 	let good_for = document.getElementById("WhoIsBetter").value;
 	let md = parseInt(document.getElementById("MaxDepth").value);
@@ -116,19 +139,13 @@ function expectValue() {
 		sum += cur;
 	}
 
-	let start_position = document.getElementById("StartingPosition").value;
-	let moveNumber = 1;
-	if(start_position) {
-		moveNumber = start_position.split(" ");
-		moveNumber = moveNumber[moveNumber.length - 1];
-	}
 	let str = `At most ${sum} positions.`;
 	ExpectVal1.innerText = str;
 }
 
 function Start(btn) {
 	btn.disabled = true;
-	start_position.setAttribute("readonly", "");
+	document.getElementById("StartingPosition").setAttribute("readonly", "");
 	start_pgn = document.getElementById("StartingPGN").value;
 	start_position = document.getElementById("StartingPosition").value;
 	//start_position = "r1bqkb1r/ppp2ppp/2n2n2/3Pp1N1/2B5/8/PPPP1PPP/RNBQK2R b KQkq - 0 5";
