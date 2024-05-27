@@ -25,7 +25,7 @@
 		<br>
 		<br>
 		Starting FEN position:
-		<input id="StartingPosition" placeholder="Enter FEN here" value="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">
+		<input id="StartingPosition" placeholder="Enter FEN here" value="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" size="60">
 		<br>
 		<br>
 		Who should be better
@@ -35,14 +35,18 @@
 		<br>
 		Max depth
 		<span class="tooltip" title="Maximum move depth to look for after the given starting fen.">(?)</span>:
-		<input id="MaxDepth" type="number" value="10">
+		<input id="MaxDepth" type="number" value="2">
 		<span id="ExpectVal1"></span>
 		<br>
 		<br>
-		Top move count
+		Top move count (For the one that should be better)
 		<span class="tooltip" title="Amount of moves to request from the API.">(?)</span>:
-		<input id="TopMove" type="number" value="16">
-		<span id="ExpectVal2"></span>
+		<input id="TopMove" type="number" value="10" min="1" max="20">
+		<br>
+		<br>
+		Top move count for the one that should be "trapped"
+		<span class="tooltip" title="Amount of moves when checking opponent responses (by play count).">(?)</span>:
+		<input id="TopMoveOpponent" type="number" value="2" min="1" max="20">
 		<br>
 		<br>
 		Usage threshold
@@ -52,26 +56,30 @@
 		<br>
 		Trap treshold
 		<span class="tooltip" title="Threshold for how better move winrate has to be for the selected player, for it to count as a 'trap'.">(?)</span>:
-		<input id="TrapThreshold" type="number" value="7">
+		<input id="TrapThreshold" type="number" value="8">
 		<br>
 		<br>
 		Master database <span class="tooltip" title="Use master games rather than Lichess database games.">(?)</span>
 		<select id="MasterDB"><option value="lichess" selected>Nope, Lichess DB</option><option value="master">Master games only</option></select>
 		<br>
 		<br>
-		<button onclick="Start()">Search</button>
+		<button onclick="Start(this)">Search</button>
 		<span id="LookingAt"></span>
 		<br>
 		<span id="PositionCount"></span>
+		<br>
+		<span id="Progress"></span>
 	</div>
 	<hr>
 </body>
 <script type="text/javascript">
 let start_pgn = "";
-let start_position = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-let good_for = "black";
+let start_position = "";
+let good_for = "white";
 let max_depth = 12;
 let move_in_result = 32; //amount of moves returned from the request
+let move_self_limit = 32; //amount of moves returned from the request
+let move_opponent_limit = 4; //amount of top used moves for the opponent
 let usage_threshold = 300; //minimum amount of played positions of the move to look into it
 let trap_threshold = 7; //this change in white/black % winrate = trap?
 let use_master_db = false;
@@ -81,83 +89,141 @@ let request_delay = 1000; //delay per request
 let request_delay_error = 50000; //delay for the request failing
 let LookingAtSpan = document.getElementById("LookingAt");
 let PositionCountSpan = document.getElementById("PositionCount");
+let ProgressSpan = document.getElementById("Progress");
 let uniquePositionsExplored = {};
+document.getElementById("StartingPosition").onchange = expectValue;
+document.getElementById("WhoIsBetter").onchange = expectValue;
 document.getElementById("MaxDepth").onchange = expectValue;
 document.getElementById("TopMove").onchange = expectValue;
+document.getElementById("TopMoveOpponent").onchange = expectValue;
+expectValue();
 
 function expectValue() {
+	let white_to_move = document.getElementById("StartingPosition").value.includes(" w ");
+	let good_for = document.getElementById("WhoIsBetter").value;
 	let md = parseInt(document.getElementById("MaxDepth").value);
-	let mc = parseInt(document.getElementById("TopMove").value);
+	let tm = parseInt(document.getElementById("TopMove").value);
+	let tmo = parseInt(document.getElementById("TopMoveOpponent").value);
 	let sum = 0;
-	for(let i = 1; i <= md; i++) {
-		sum += mc ** i;
+	let cur = 1;
+
+	for(let i = 0; i < md; i++) {
+		if((white_to_move && good_for === "black") || (!white_to_move && good_for === "white")) {
+			cur *= (i % 2 == 1 ? tm : tmo);
+		} else {
+			cur *= (i % 2 == 0 ? tm : tmo);
+		}
+		sum += cur;
 	}
-	let str = `Expecting at most ${sum} positions`;
+
+	let start_position = document.getElementById("StartingPosition").value;
+	let moveNumber = 1;
+	if(start_position) {
+		moveNumber = start_position.split(" ");
+		moveNumber = moveNumber[moveNumber.length - 1];
+	}
+	let str = `At most ${sum} positions.`;
 	ExpectVal1.innerText = str;
-	ExpectVal2.innerText = str;
 }
 
-function Start() {
+function Start(btn) {
+	btn.disabled = true;
+	start_position.setAttribute("readonly", "");
 	start_pgn = document.getElementById("StartingPGN").value;
 	start_position = document.getElementById("StartingPosition").value;
-	good_for = document.getElementById("WhoIsBetter").value === "white";
+	//start_position = "r1bqkb1r/ppp2ppp/2n2n2/3Pp1N1/2B5/8/PPPP1PPP/RNBQK2R b KQkq - 0 5";
+	good_for = document.getElementById("WhoIsBetter").value;
 	max_depth = parseInt(document.getElementById("MaxDepth").value);
-	move_in_result = parseInt(document.getElementById("TopMove").value);
+	move_self_limit = parseInt(document.getElementById("TopMove").value);
+	move_opponent_limit = parseInt(document.getElementById("TopMoveOpponent").value);
+	move_in_result = move_opponent_limit > move_self_limit ? move_opponent_limit : move_self_limit;
 	usage_threshold = parseInt(document.getElementById("UsageThreshold").value);
 	trap_threshold = parseInt(document.getElementById("TrapThreshold").value);
 	use_master_db = document.getElementById("MasterDB").value === "master";
 	white_to_move = start_position.includes(" w ");
 
-	search(0, start_position, start_pgn, white_to_move);
+	window.startTime = Date.now();
+	search(0, start_position, start_pgn, white_to_move, 0, 1);
 }
 
-async function search(depth, position, pgn, whiteToMove) {
-	if(depth > max_depth || uniquePositionsExplored[position]) {
+async function search(depth, position, pgn, whiteToMove, progressStart, progressEnd) {
+	if(depth > max_depth) {
 		return;
 	}
-	console.log(depth, pgn);
 	LookingAtSpan.innerText = "Looking at: " + pgn;
 	PositionCountSpan.innerText = `Explored ${Object.keys(uniquePositionsExplored).length} unique positions.`;
+
+	let c = new Chess(position);
+
+	let movelessFEN = getMovelessFEN(c);
+	console.log(pgn);
+	if(uniquePositionsExplored[movelessFEN]) {
+		return;
+	}
+	uniquePositionsExplored[movelessFEN] = true;
+
 	let res = await getLichessExplorerData(position);
 	if(!res) {
 		return await search(depth, position, pgn, whiteToMove);
 	}
-	uniquePositionsExplored[position] = true;
 
-	let c = new Chess(position);
 	let sum = res.white + res.black + res.draws;
 	let w_wr = (res.white / sum * 100);
 	let b_wr = (res.black / sum * 100);
 
-	for(let i = 0; i < res.moves.length; i++) {
-		//console.log("Looking at", res.moves[i].san);
+	let limit = res.moves.length >= move_self_limit ? move_self_limit : res.moves.length;
+	if((good_for === "white" && !whiteToMove) || (good_for === "black" && whiteToMove)) {
+		limit = res.moves.length >= move_opponent_limit ? move_opponent_limit : res.moves.length;
+	}
+
+	let currentProgressPerSlice = (progressEnd - progressStart) / limit;
+
+	for(let i = 0; i < limit; i++) {
+		let newProgressStart = progressStart + (i) * currentProgressPerSlice;
+		let newProgressEnd = newProgressStart + currentProgressPerSlice;
+
 		let sum_now = res.moves[i].white + res.moves[i].black + res.moves[i].draws;
 		if(sum_now < usage_threshold) {
 			continue; //Not good enough
 		}
 
+		c.move(res.moves[i].san);
+
 		let w_wr_now = (res.moves[i].white / sum_now * 100);
 		let b_wr_now = (res.moves[i].black / sum_now * 100);
 		let jump = hasWinrateJump(w_wr, b_wr, w_wr_now, b_wr_now);
 
-		if(jump) {
-			//if((whiteToMove && (jump === "+w" || jump === "-b")) || (!whiteToMove && (jump === "+b" || jump === "-w"))) {
-			if(good_for === "black" && (!whiteToMove && (jump === "+b" || jump === "-w"))) {
-				displayResult(pgn + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
-			}
-			if(good_for === "white" && (whiteToMove && (jump === "+w" || jump === "-b"))) {
-				displayResult(pgn + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
-			}
-		} else {
-			c.move(res.moves[i].san);
-			await search(depth + 1, c.fen(), pgn + res.moves[i].san + " ", !whiteToMove);
-			c.undo();
+		if(jump && good_for === "black" && b_wr_now > 50 && !whiteToMove && jump === "+b") {
+			displayResult(pgn + " " + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
 		}
+
+		if(jump && good_for === "white" && w_wr_now > 50 && whiteToMove && jump === "+w") {
+			displayResult(pgn + " " + res.moves[i].san, w_wr, w_wr_now, b_wr, b_wr_now);
+		}
+
+		let estimateString = estimateEndTime(newProgressStart);
+		ProgressSpan.innerText = `Progress: ${(100*newProgressStart).toFixed(2)}% | Finish on ${estimateString}`;
+		await search(depth + 1, c.fen(), pgn + " " + res.moves[i].san, !whiteToMove, newProgressStart, newProgressEnd);
+
+		c.undo();
 	}
 	if(depth === 0) {
-		alert("Finished looking!");
 		LookingAtSpan.innerHTML = "<b>Finished.</b>";
+		ProgressSpan.innerText = `Progress: 100%`;
 	}
+}
+
+function estimateEndTime(progress) {
+	if(progress <= 0) return "*Calculating...*";
+
+	let diff = Date.now() - window.startTime;
+	let newTime = window.startTime + (diff / progress);
+	return (new Date(newTime)).toString();
+}
+
+//FEN but position only
+function getMovelessFEN(chessObj) {
+	return chessObj.fen().split(" ").slice(0,3).join(" ");
 }
 
 function displayResult(pgn, w_wr, w_wr_now, b_wr, b_wr_now) {
@@ -165,7 +231,7 @@ function displayResult(pgn, w_wr, w_wr_now, b_wr, b_wr_now) {
 	let div = document.createElement("div");
 	div.innerText = pgn;
 	let div2 = document.createElement("div");
-	div2.innerText = `Difference: W{${(w_wr_now-w_wr).toFixed(2)}} B{${(b_wr_now-b_wr).toFixed(2)}}`;
+	div2.innerText = `Difference from previous move's winrate: W{${(w_wr_now-w_wr).toFixed(2)}} B{${(b_wr_now-b_wr).toFixed(2)}}`;
 
 	outer.appendChild(div);
 	outer.appendChild(div2);
@@ -173,14 +239,14 @@ function displayResult(pgn, w_wr, w_wr_now, b_wr, b_wr_now) {
 }
 
 function hasWinrateJump(w1, b1, w2, b2) {
-	if(Math.abs(w1 - w2) >= trap_threshold) {
+	if(Math.abs(w1 - w2) >= trap_threshold && good_for === "white") {
 		if(w2 > w1) {
 			return "+w"; //white wr increased
 		} else {
 			return "-w";
 		}
 	}
-	if(Math.abs(b1 - b2) >= trap_threshold) {
+	if(Math.abs(b1 - b2) >= trap_threshold && good_for === "black") {
 		if(b2 > b1) {
 			return "+b"; //black wr increased
 		} else {
@@ -191,13 +257,13 @@ function hasWinrateJump(w1, b1, w2, b2) {
 }
 
 function getLichessExplorerData(fen) {
-	var url = "https://explorer.lichess.ovh/" + (use_master_db ? "master" : "lichess") +
+	let url = "https://explorer.lichess.ovh/" + (use_master_db ? "master" : "lichess") +
 		"?variant=standard" +
 		"&moves=" + move_in_result +
 		"&topGames=0" +
 		"&fen=" + fen +
-		"&speeds[]=blitz&speeds[]=classical&speeds[]=bullet&speeds[]=rapid" +
-		"&ratings[]=2000&ratings[]=2200&ratings[]=2500&ratings[]=1800&ratings[]=1600";
+		"&speeds=blitz" +
+		"&ratings=1600,1800,2000";
 
 	return fetch(url)
 		.then(response => response.status === 200 ? response.json() : null)
