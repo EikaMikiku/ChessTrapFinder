@@ -24,19 +24,34 @@
 			border-bottom: 2px dotted;
 		}
 		#StartingBoard {
-			position: absolute;
-			right: 10px;
-			top: 10px;
-			width: 330px;
+			position: fixed;
+			right: 20px;
+			top: 20px;
+			width: 320px;
+		}
+		.result-board {
+			width: 175px;
+			display: inline-block;
+		}
+		.highlight-board-move-from {
+			box-shadow: inset 0 0 3px 3px green;
+		}
+		.highlight-board-move-to {
+			box-shadow: inset 0 0 3px 3px green;
+		}
+		.bg {
+			position: fixed;
+			bottom: 0;
+			right: 0;
+			zoom: 50%;
+			opacity: 0.2;
+			z-index: 0;
 		}
 	</style>
 </head>
 <body>
+	<img class="bg" src="./img/morty.png">
 	<div>
-		Starting PGN text:
-		<input id="StartingPGN" placeholder="This is optional" value="">
-		<br>
-		<br>
 		Starting FEN position:
 		<input id="StartingPosition" placeholder="Enter FEN here" value="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" size="60">
 		<br>
@@ -75,6 +90,24 @@
 		Master database <span class="tooltip" title="Use master games rather than Lichess database games.">(?)</span>
 		<select id="MasterDB"><option value="lichess" selected>Nope, Lichess DB</option><option value="master">Master games only</option></select>
 		<br>
+		<div id="OnlyForLichess">
+			<label>0:<input id="lichess-rating-0" type="checkbox"></label>&nbsp;
+			<label>1000:<input id="lichess-rating-1000" type="checkbox"></label>&nbsp;
+			<label>1200:<input id="lichess-rating-1200" type="checkbox"></label>&nbsp;
+			<label>1400:<input id="lichess-rating-1400" type="checkbox"></label>&nbsp;
+			<label>1600:<input id="lichess-rating-1600" type="checkbox" checked></label>&nbsp;
+			<label>1800:<input id="lichess-rating-1800" type="checkbox" checked></label>&nbsp;
+			<label>2000:<input id="lichess-rating-2000" type="checkbox" checked></label>&nbsp;
+			<label>2200:<input id="lichess-rating-2200" type="checkbox"></label>&nbsp;
+			<label>2500:<input id="lichess-rating-2500" type="checkbox"></label>&nbsp;
+			<br>
+			<label>Ultra Bullet:<input id="lichess-speed-ultrabullet" type="checkbox" ></label>&nbsp;
+			<label>Bullet:<input id="lichess-speed-bullet" type="checkbox" ></label>&nbsp;
+			<label>Blitz:<input id="lichess-speed-blitz" type="checkbox" checked></label>&nbsp;
+			<label>Rapid:<input id="lichess-speed-rapid" type="checkbox" ></label>&nbsp;
+			<label>Classical:<input id="lichess-speed-classical" type="checkbox" ></label>&nbsp;
+			<label>Correspondence:<input id="lichess-speed-correspondence" type="checkbox" ></label>&nbsp;
+		</div>
 		<br>
 		<button onclick="Start(this)">Search</button>
 		<span id="LookingAt"></span>
@@ -87,7 +120,6 @@
 	<hr>
 </body>
 <script type="text/javascript">
-let start_pgn = "";
 let start_position = "";
 let good_for = "white";
 let max_depth = 12;
@@ -104,9 +136,17 @@ let request_delay_error = 50000; //delay for the request failing
 let LookingAtSpan = document.getElementById("LookingAt");
 let PositionCountSpan = document.getElementById("PositionCount");
 let ProgressSpan = document.getElementById("Progress");
+let OnlyForLichess = document.getElementById("OnlyForLichess");
 let uniquePositionsExplored = {};
-let StartingBoard = Chessboard('StartingBoard', 'start');
+let StartingBoard = Chessboard("StartingBoard", "start");
 
+document.getElementById("MasterDB").onchange =function(e) {
+	if(this.value === "lichess") {
+		OnlyForLichess.style.display = "";
+	} else {
+		OnlyForLichess.style.display = "none";
+	}
+};
 document.getElementById("StartingPosition").onchange = function(e) {
 	StartingBoard.position(this.value);
 	updateExpectValue();
@@ -114,7 +154,7 @@ document.getElementById("StartingPosition").onchange = function(e) {
 document.getElementById("WhoIsBetter").onchange = function(e) {
 	StartingBoard.orientation(this.value);
 	updateExpectValue();
-};;
+};
 document.getElementById("MaxDepth").onchange = updateExpectValue;
 document.getElementById("TopMove").onchange = updateExpectValue;
 document.getElementById("TopMoveOpponent").onchange = updateExpectValue;
@@ -146,7 +186,7 @@ function updateExpectValue() {
 function Start(btn) {
 	btn.disabled = true;
 	document.getElementById("StartingPosition").setAttribute("readonly", "");
-	start_pgn = document.getElementById("StartingPGN").value;
+
 	start_position = document.getElementById("StartingPosition").value;
 	//start_position = "r1bqkb1r/ppp2ppp/2n2n2/3Pp1N1/2B5/8/PPPP1PPP/RNBQK2R b KQkq - 0 5";
 	good_for = document.getElementById("WhoIsBetter").value;
@@ -160,7 +200,7 @@ function Start(btn) {
 	white_to_move = start_position.includes(" w ");
 
 	window.startTime = Date.now();
-	search(0, start_position, start_pgn, white_to_move, 0, 1);
+	search(0, start_position, "", white_to_move, 0, 1);
 }
 
 async function search(depth, position, pgn, whiteToMove, progressStart, progressEnd) {
@@ -219,7 +259,7 @@ async function search(depth, position, pgn, whiteToMove, progressStart, progress
 		}
 
 		let estimateString = estimateEndTime(newProgressStart);
-		ProgressSpan.innerText = `Progress: ${(100*newProgressStart).toFixed(2)}% | Finish on ${estimateString}`;
+		ProgressSpan.innerText = `Progress: ${(100*newProgressStart).toFixed(2)}% | Finish before ${estimateString}`;
 		await search(depth + 1, c.fen(), pgn + " " + res.moves[i].san, !whiteToMove, newProgressStart, newProgressEnd);
 
 		c.undo();
@@ -248,11 +288,36 @@ function displayResult(pgn, w_wr, w_wr_now, b_wr, b_wr_now) {
 	let div = document.createElement("div");
 	div.innerText = pgn;
 	let div2 = document.createElement("div");
-	div2.innerText = `Difference from previous move's winrate: W{${(w_wr_now-w_wr).toFixed(2)}} B{${(b_wr_now-b_wr).toFixed(2)}}`;
+
+	let winrateStr = `Winrate change: `;
+	winrateStr += `White {${w_wr.toFixed(2)} => ${w_wr_now.toFixed(2)}}(${(w_wr_now-w_wr).toFixed(2)})`;
+	winrateStr += ` | `;
+	winrateStr += `Black {${b_wr.toFixed(2)} => ${b_wr_now.toFixed(2)}}(${(b_wr_now-b_wr).toFixed(2)})`;
+	div2.innerText = winrateStr;
 
 	outer.appendChild(div);
 	outer.appendChild(div2);
 	document.body.appendChild(outer);
+	let c = new Chess(start_position);
+	let moves = pgn.trim().split(" ");
+	for(let move of moves) {
+		c.move(move);
+		let history = c.history({verbose:true});
+		let lastMove = history[history.length - 1];
+
+		let boardDiv = document.createElement("div");
+		boardDiv.className = "result-board";
+		outer.appendChild(boardDiv);
+		let board = new Chessboard(boardDiv, {
+			position: c.fen(),
+			orientation: document.getElementById("WhoIsBetter").value,
+			showNotation: false
+		});
+
+		let $boardDiv = $(boardDiv);
+		$boardDiv.find(".square-" + lastMove.from).addClass("highlight-board-move-from");
+		$boardDiv.find(".square-" + lastMove.to).addClass("highlight-board-move-to");
+	}
 }
 
 function hasWinrateJump(w1, b1, w2, b2) {
@@ -274,13 +339,34 @@ function hasWinrateJump(w1, b1, w2, b2) {
 }
 
 function getLichessExplorerData(fen) {
+	let ratings = "";
+	ratings += $("#lichess-rating-0").prop("checked") ? "0 " : "";
+	ratings += $("#lichess-rating-1000").prop("checked") ? "1000 " : "";
+	ratings += $("#lichess-rating-1200").prop("checked") ? "1200 " : "";
+	ratings += $("#lichess-rating-1400").prop("checked") ? "1400 " : "";
+	ratings += $("#lichess-rating-1600").prop("checked") ? "1600 " : "";
+	ratings += $("#lichess-rating-1800").prop("checked") ? "1800 " : "";
+	ratings += $("#lichess-rating-2000").prop("checked") ? "2000 " : "";
+	ratings += $("#lichess-rating-2200").prop("checked") ? "2200 " : "";
+	ratings += $("#lichess-rating-2500").prop("checked") ? "2500 " : "";
+	ratings = ratings.trim().replaceAll(" ", ",");
+
+	let speeds = "";
+	speeds += $("#lichess-speed-ultrabullet").prop("checked") ? "ultrabullet " : "";
+	speeds += $("#lichess-speed-bullet").prop("checked") ? "bullet " : "";
+	speeds += $("#lichess-speed-blitz").prop("checked") ? "blitz " : "";
+	speeds += $("#lichess-speed-rapid").prop("checked") ? "rapid " : "";
+	speeds += $("#lichess-speed-classical").prop("checked") ? "classical " : "";
+	speeds += $("#lichess-speed-correspondence").prop("checked") ? "correspondence " : "";
+	speeds = speeds.trim().replaceAll(" ", ",");
+
 	let url = "https://explorer.lichess.ovh/" + (use_master_db ? "master" : "lichess") +
 		"?variant=standard" +
 		"&moves=" + move_in_result +
 		"&topGames=0" +
 		"&fen=" + fen +
-		"&speeds=blitz" +
-		"&ratings=1600,1800,2000";
+		"&speeds=" + speeds +
+		"&ratings=" + ratings;
 
 	return fetch(url)
 		.then(response => response.status === 200 ? response.json() : null)
